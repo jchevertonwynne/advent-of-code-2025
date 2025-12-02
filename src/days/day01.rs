@@ -2,7 +2,7 @@ use crate::{DayResult, IntoDayResult};
 use anyhow::Result;
 
 pub fn solve(input: &str) -> Result<DayResult> {
-        let mut p1 = 0;
+    let mut p1 = 0;
     let mut p2 = 0;
 
     let mut pos: i32 = 50;

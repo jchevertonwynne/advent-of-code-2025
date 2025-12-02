@@ -30,6 +30,7 @@ dependencies = [
  "criterion",
  "fxhash",
  "itertools 0.14.0",
+ "itoa",
  "nom",
  "num",
  "regex",

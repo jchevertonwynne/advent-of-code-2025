@@ -1,55 +1,67 @@
 use crate::{DayResult, IntoDayResult};
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 pub fn solve(input: &str) -> Result<DayResult> {
-    let mut pos: isize = 50;
-    let mut p1 = 0;
+        let mut p1 = 0;
     let mut p2 = 0;
-    for line in input.lines() {
-        let dir = line.as_bytes()[0];
-        let number = line[1..]
-            .parse::<isize>()
-            .context("failed to parse integer")?;
 
-        p2 += zero_hits(pos, dir, number);
+    let mut pos: i32 = 50;
+    let mut dir: i32 = -1;
+    let mut number: i32 = 0;
+    let mut has_number = false;
 
-        pos = match dir {
-            b'L' => (pos - number).rem_euclid(100),
-            b'R' => (pos + number).rem_euclid(100),
-            _ => unreachable!(),
-        };
-
-        if pos == 0 {
-            p1 += 1;
+    for &b in input.as_bytes() {
+        match b {
+            b'L' => dir = -1,
+            b'R' => dir = 1,
+            b'\n' => {
+                if has_number {
+                    apply_turn(&mut pos, dir, number, &mut p1, &mut p2);
+                    number = 0;
+                    has_number = false;
+                }
+            }
+            b'0'..=b'9' => {
+                number = number * 10 + (b - b'0') as i32;
+                has_number = true;
+            }
+            _ => {}
         }
+    }
+
+    if has_number {
+        apply_turn(&mut pos, dir, number, &mut p1, &mut p2);
     }
 
     (p1, p2).into_result()
 }
 
-fn zero_hits(pos: isize, dir: u8, steps: isize) -> isize {
-    let steps_until_zero = match dir {
-        b'R' => {
-            if pos == 0 {
-                100
-            } else {
-                100 - pos
-            }
+#[inline(always)]
+fn apply_turn(pos: &mut i32, dir: i32, steps: i32, p1: &mut i32, p2: &mut i32) {
+    let steps_until_zero = if dir > 0 {
+        if *pos == 0 {
+            100
+        } else {
+            100 - *pos
         }
-        b'L' => {
-            if pos == 0 {
-                100
-            } else {
-                pos
-            }
-        }
-        _ => unreachable!(),
+    } else if *pos == 0 {
+        100
+    } else {
+        *pos
     };
 
-    if steps < steps_until_zero {
-        0
-    } else {
-        1 + (steps - steps_until_zero) / 100
+    if steps >= steps_until_zero {
+        *p2 += 1 + (steps - steps_until_zero) / 100;
+    }
+
+    *pos += dir * steps;
+    *pos %= 100;
+    if *pos < 0 {
+        *pos += 100;
+    }
+
+    if *pos == 0 {
+        *p1 += 1;
     }
 }
 
@@ -57,7 +69,6 @@ fn zero_hits(pos: isize, dir: u8, steps: isize) -> isize {
 mod tests {
     use crate::{days::day01::solve, IntoDayResult};
 
-    #[ignore]
     #[test]
     fn works_for_example() {
         const INPUT: &str = include_str!("../../test_input/day01.txt");
@@ -65,7 +76,6 @@ mod tests {
         assert_eq!((3, 6).into_day_result(), solution);
     }
 
-    #[ignore]
     #[test]
     fn works_for_input() {
         const INPUT: &str =

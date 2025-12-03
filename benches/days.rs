@@ -20,7 +20,12 @@ fn criterion_benchmark(c: &mut Criterion) {
             });
         }};
         ($day:tt, is_test) => {{
-            const INPUT: &str = include_str!(concat!("../input/", stringify!($day), ".txt"));
+            const INPUT: &str = include_str!(concat!(
+                std::env!("AOC_CACHE"),
+                "/2025_",
+                stringify!($day),
+                ".txt"
+            ));
             c.bench_function(stringify!($day), |b| {
                 b.iter(|| advent_of_code_2025::days::$day::solve(black_box(INPUT), false))
             });
@@ -34,7 +39,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // bench_day!(day01);
     // bench_day!(day02);
-    bench_day!(day03);
+    bench_day!(day03, is_test);
     // bench_day!(day04);
     // bench_day!(day05);
     // bench_day!(day06);

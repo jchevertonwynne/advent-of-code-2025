@@ -1,66 +1,217 @@
+use std::collections::VecDeque;
+use std::ops::{Index, IndexMut};
+
 use crate::{DayResult, IntoDayResult};
 use anyhow::Result;
 
+const NEIGHBOR_OFFSETS: [(isize, isize); 8] = [
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, -1),
+    (0, 1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+];
+
 pub fn solve(_input: &str) -> Result<DayResult> {
-    let mut board: Vec<Vec<bool>> = _input
-        .lines()
-        .map(|line| line.chars().map(|c| c == '@').collect())
-        .collect();
-    let mut removeable = vec![];
+    let bytes = _input.as_bytes();
+    let mut raw = Vec::with_capacity(bytes.len());
+    let mut width = None;
+    let mut current_width = 0usize;
+    let mut height = 0usize;
 
-    run_loop(&board, &mut removeable);
-
-    let p1 = removeable.len();
-    let mut p2 = removeable.len();
-
-    while removeable.len() > 0 {
-        for (x, y) in removeable.drain(..) {
-            board[x][y] = false;
+    for &b in bytes {
+        match b {
+            b'@' => {
+                raw.push(true);
+                current_width += 1;
+            }
+            b'.' => {
+                raw.push(false);
+                current_width += 1;
+            }
+            b'\n' => {
+                if current_width == 0 {
+                    continue;
+                }
+                if let Some(w) = width {
+                    debug_assert_eq!(w, current_width);
+                } else {
+                    width = Some(current_width);
+                }
+                height += 1;
+                current_width = 0;
+            }
+            _ => {}
         }
-        run_loop(&board, &mut removeable);
-        p2 += removeable.len();
     }
 
+    if current_width > 0 {
+        if let Some(w) = width {
+            debug_assert_eq!(w, current_width);
+        } else {
+            width = Some(current_width);
+        }
+        height += 1;
+    }
 
-    (p1, p2).into_result()
-}
+    let width = width.expect("lines must not be empty");
+    assert!(height > 0, "input must contain at least one row");
+    debug_assert_eq!(raw.len(), width * height);
 
-fn run_loop(board: &Vec<Vec<bool>>, removeable: &mut Vec<(usize, usize)>) {
-        for x in 0..board.len() {
-        for y in 0..board[0].len() {
-            if !board[x][y] {
+    let cells = raw.into_iter().map(Cell::new).collect();
+    let mut board = Grid::new(height, width, cells);
+    let rows = board.height();
+    let cols = board.width();
+    let rows_i = rows as isize;
+    let cols_i = cols as isize;
+    let mut queue = VecDeque::new();
+
+    for x in 0..rows {
+        for y in 0..cols {
+            if !board[(x, y)].alive {
                 continue;
             }
-            let mut adjacent = 0;
-            for dx in -1..=1 {
-                for dy in -1..=1 {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-                    let nx = x as isize + dx;
-                    let ny = y as isize + dy;
-                    let Ok(nx) = usize::try_from(nx) else {
-                        continue;
-                    };
-                    if nx >= board.len() {
-                        continue;
-                    }
-                    let Ok(ny) = usize::try_from(ny) else {
-                        continue;
-                    };
-                    if ny >= board[0].len() {
-                        continue;
-                    }
-                    if board[nx][ny] {
-                        adjacent += 1;
-                    }
+
+            let adjacent = alive_neighbor_count(&board, x, y, rows_i, cols_i);
+            {
+                let cell = board.get_mut(x, y);
+                cell.degree = adjacent;
+                if adjacent < 4 {
+                    cell.queued = true;
+                    queue.push_back((x, y));
                 }
-            }
-            if adjacent < 4 {
-                removeable.push((x, y));
             }
         }
     }
+
+    let p1 = queue.len();
+    let mut removed = 0usize;
+
+    // Peel low-degree tiles using a queue so we only revisit cells whose degree drops.
+    while let Some((x, y)) = queue.pop_front() {
+        {
+            let cell = board.get_mut(x, y);
+            if !cell.alive {
+                cell.queued = false;
+                continue;
+            }
+            cell.alive = false;
+            cell.queued = false;
+        }
+        removed += 1;
+
+        for &(dx, dy) in &NEIGHBOR_OFFSETS {
+            let nx = x as isize + dx;
+            let ny = y as isize + dy;
+            if nx < 0 || nx >= rows_i || ny < 0 || ny >= cols_i {
+                continue;
+            }
+            let nx = nx as usize;
+            let ny = ny as usize;
+            let neighbor = board.get_mut(nx, ny);
+            if !neighbor.alive || neighbor.degree == 0 {
+                continue;
+            }
+            neighbor.degree -= 1;
+            if neighbor.degree == 3 && !neighbor.queued {
+                neighbor.queued = true;
+                queue.push_back((nx, ny));
+            }
+        }
+    }
+
+    (p1, removed).into_result()
+}
+
+#[derive(Clone, Copy)]
+struct Cell {
+    alive: bool,
+    degree: u8,
+    queued: bool,
+}
+
+impl Cell {
+    fn new(alive: bool) -> Self {
+        Self {
+            alive,
+            degree: 0,
+            queued: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Grid<T> {
+    data: Vec<T>,
+    height: usize,
+    width: usize,
+}
+
+impl<T> Grid<T> {
+    fn new(height: usize, width: usize, data: Vec<T>) -> Self {
+        debug_assert_eq!(height * width, data.len());
+        Self {
+            data,
+            height,
+            width,
+        }
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn idx(&self, x: usize, y: usize) -> usize {
+        x * self.width + y
+    }
+
+    fn get(&self, x: usize, y: usize) -> &T {
+        let idx = self.idx(x, y);
+        unsafe { self.data.get_unchecked(idx) }
+    }
+
+    fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
+        let idx = self.idx(x, y);
+        unsafe { self.data.get_unchecked_mut(idx) }
+    }
+}
+
+impl<T> Index<(usize, usize)> for Grid<T> {
+    type Output = T;
+
+    fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
+        self.get(x, y)
+    }
+}
+
+impl<T> IndexMut<(usize, usize)> for Grid<T> {
+    fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
+        self.get_mut(index.0, index.1)
+    }
+}
+
+fn alive_neighbor_count(board: &Grid<Cell>, x: usize, y: usize, rows: isize, cols: isize) -> u8 {
+    let xi = x as isize;
+    let yi = y as isize;
+    let mut adjacent = 0u8;
+    for &(dx, dy) in &NEIGHBOR_OFFSETS {
+        let nx = xi + dx;
+        let ny = yi + dy;
+        if nx < 0 || nx >= rows || ny < 0 || ny >= cols {
+            continue;
+        }
+        if board[(nx as usize, ny as usize)].alive {
+            adjacent += 1;
+        }
+    }
+    adjacent
 }
 
 #[cfg(test)]

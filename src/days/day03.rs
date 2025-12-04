@@ -1,5 +1,6 @@
 use crate::{DayResult, IntoDayResult};
 use anyhow::Result;
+use std::ptr;
 
 const TEST_MAX_DIGITS: usize = 15;
 const REAL_MAX_DIGITS: usize = 100;
@@ -20,7 +21,7 @@ fn solve_impl<const WIDTH: usize>(input: &[u8]) -> (usize, usize) {
     let mut p2 = 0;
     let stride = WIDTH + 1;
     for chunk in input.chunks_exact(stride) {
-        let digits = &chunk[..WIDTH];
+        let digits = unsafe { chunk.get_unchecked(..WIDTH) };
         p1 += best_two(digits) as usize;
         p2 += best_twelve::<WIDTH>(digits) as usize;
     }
@@ -28,50 +29,106 @@ fn solve_impl<const WIDTH: usize>(input: &[u8]) -> (usize, usize) {
 }
 
 fn best_two(digits: &[u8]) -> u64 {
+    // Track the best possible second digit while scanning from right to left so we only
+    // touch the slice once and still respect ordering constraints.
     let n = digits.len();
-    let mut max_d1 = 0;
-    let mut idx_d1 = 0;
+    let mut best_suffix = unsafe { *digits.get_unchecked(n - 1) };
+    let mut best_pair = 0u64;
 
-    for (i, &d) in digits[..n - 1].iter().enumerate() {
-        if d > max_d1 {
-            max_d1 = d;
-            idx_d1 = i;
-            if max_d1 == b'9' {
+    for i in (0..n - 1).rev() {
+        let d1 = unsafe { *digits.get_unchecked(i) };
+        let candidate = ((d1 - b'0') as u64) * 10 + ((best_suffix - b'0') as u64);
+        if candidate > best_pair {
+            best_pair = candidate;
+            if best_pair == 99 {
                 break;
             }
         }
-    }
-
-    let mut max_d2 = 0;
-    for &d in &digits[idx_d1 + 1..] {
-        if d > max_d2 {
-            max_d2 = d;
-            if max_d2 == b'9' {
-                break;
-            }
+        if d1 > best_suffix {
+            best_suffix = d1;
         }
     }
 
-    ((max_d1 - b'0') as u64) * 10 + (max_d2 - b'0') as u64
+    best_pair
 }
 
 fn best_twelve<const MAX_DIGITS: usize>(digits: &[u8]) -> u64 {
+    if MAX_DIGITS <= 24 {
+        return best_twelve_simple::<MAX_DIGITS>(digits);
+    }
+    best_twelve_tail_copy::<MAX_DIGITS>(digits)
+}
+
+#[inline(always)]
+fn best_twelve_simple<const MAX_DIGITS: usize>(digits: &[u8]) -> u64 {
     let mut stack = [0u8; MAX_DIGITS];
     let mut len = 0;
     let mut to_remove = digits.len() - 12;
-
     for &digit in digits {
-        while to_remove > 0 && len > 0 && digit > stack[len - 1] {
+        while to_remove > 0 && len > 0 && digit > unsafe { *stack.get_unchecked(len - 1) } {
             len -= 1;
             to_remove -= 1;
         }
-        stack[len] = digit;
+        unsafe { *stack.get_unchecked_mut(len) = digit };
         len += 1;
     }
 
+    while to_remove > 0 {
+        len -= 1;
+        to_remove -= 1;
+    }
+
+    digits12_to_u64(&stack)
+}
+
+#[inline(always)]
+fn best_twelve_tail_copy<const MAX_DIGITS: usize>(digits: &[u8]) -> u64 {
+    let mut stack = [0u8; MAX_DIGITS];
+    let mut len = 0;
+    let mut to_remove = digits.len() - 12;
+    let mut idx = 0;
+
+    while idx < digits.len() {
+        let digit = unsafe { *digits.get_unchecked(idx) };
+        idx += 1;
+
+        while to_remove > 0 && len > 0 && digit > unsafe { *stack.get_unchecked(len - 1) } {
+            len -= 1;
+            to_remove -= 1;
+        }
+
+        unsafe { *stack.get_unchecked_mut(len) = digit };
+        len += 1;
+
+        if to_remove == 0 {
+            let remaining = digits.len() - idx;
+            if remaining > 0 {
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        digits.get_unchecked(idx),
+                        stack.get_unchecked_mut(len),
+                        remaining,
+                    );
+                }
+                len += remaining;
+            }
+            break;
+        }
+    }
+
+    while to_remove > 0 {
+        len -= 1;
+        to_remove -= 1;
+    }
+
+    digits12_to_u64(&stack)
+}
+
+#[inline(always)]
+fn digits12_to_u64(buf: &[u8]) -> u64 {
     let mut res = 0u64;
     for i in 0..12 {
-        res = res * 10 + (stack[i] - b'0') as u64;
+        res = res * 10 + unsafe { (*buf.get_unchecked(i) - b'0') as u64 };
     }
     res
 }
